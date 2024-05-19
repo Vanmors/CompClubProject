@@ -60,7 +60,7 @@ func (club *Club) RemoveUsersAfterTime() {
 	for client := range club.clients {
 		club.calculateRevenue(club.clients[client], club.closeTime)
 		delete(club.clients, client)
-		outLog := club.closeTime.Format("15:04") + " 11 " + client
+		outLog := club.closeTime.Format(TemplateFormatTime) + " 11 " + client
 		club.eventLog = append(club.eventLog, outLog)
 	}
 }
