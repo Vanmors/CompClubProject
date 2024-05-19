@@ -80,6 +80,7 @@ docker run comp_club_project
 08:30 1 client1
 08:45 2 client1 1
 09:00 2 client1 2
+09:15 4 client3
 09:15 13 ClientUnknown
 17:00 11 client1
 17:00
