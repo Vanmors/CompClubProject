@@ -10,6 +10,7 @@ import (
 )
 
 const TemplateFormatTime = "15:04"
+const InitTime = "00:00"
 
 func Run(filename string) {
 	file, err := os.Open(filename)
@@ -34,127 +35,126 @@ func Run(filename string) {
 	scanner.Scan()
 	club.tables, err = strconv.Atoi(scanner.Text())
 	if err != nil {
-		fmt.Println("Input format error: " + scanner.Text())
-		os.Exit(1)
+		formatError(scanner.Text())
 	}
 
 	scanner.Scan()
 	times := strings.Split(scanner.Text(), " ")
 	club.openTime, err = time.Parse(TemplateFormatTime, times[0])
 	if err != nil {
-		fmt.Println("Input format error: " + times[0] + " " + times[1])
-		os.Exit(1)
+		formatError(scanner.Text())
 	}
 	club.closeTime, err = time.Parse(TemplateFormatTime, times[1])
 	if err != nil {
-		fmt.Println("Input format error: " + times[0] + " " + times[1])
-		os.Exit(1)
+		formatError(scanner.Text())
 	}
 
 	scanner.Scan()
 	club.pricePerHour, err = strconv.Atoi(scanner.Text())
 	if err != nil {
-		fmt.Println("Input format error: " + scanner.Text())
-		os.Exit(1)
+		formatError(scanner.Text())
 	}
 
 	for scanner.Scan() {
 		events = append(events, scanner.Text())
 	}
 
+	prevTimeEvent, _ := time.Parse(TemplateFormatTime, InitTime)
+
 	for _, event := range events {
-		parts := strings.Split(event, " ")
-		eventTime, err := time.Parse(TemplateFormatTime, parts[0])
-		if err != nil {
-			fmt.Println("Input format error: " + event)
-			os.Exit(1)
-		}
-		eventId, err := strconv.Atoi(parts[1])
-		if err != nil || eventId > 4 || eventId < 1 {
-			fmt.Println("Input format error: " + event)
-			os.Exit(1)
-		}
-		clientName := parts[2]
-
-		if eventTime.After(club.closeTime) {
-			club.RemoveUsersAfterTime()
-		}
-
-		switch eventId {
-		case 1:
-			outLog := eventTime.Format(TemplateFormatTime) + " 1 " + clientName
-			club.eventLog = append(club.eventLog, outLog)
-			if _, exists := club.clients[clientName]; exists {
-				outLog := eventTime.Format(TemplateFormatTime) + " 13 " + "YouShallNotPass"
-				club.eventLog = append(club.eventLog, outLog)
-			} else if eventTime.Before(club.openTime) || eventTime.After(club.closeTime) {
-				outLog = eventTime.Format(TemplateFormatTime) + " 13 " + "NotOpenYet"
-				club.eventLog = append(club.eventLog, outLog)
-			} else {
-				club.clients[clientName] = &Client{name: clientName}
-			}
-		case 2:
-			tableNumber, _ := strconv.Atoi(parts[3])
-			if tableNumber > club.tables {
-				fmt.Println(event)
-				os.Exit(1)
-			}
-			outLog := eventTime.Format(TemplateFormatTime) + " 2 " + clientName + " " + strconv.Itoa(tableNumber)
-			club.eventLog = append(club.eventLog, outLog)
-			if client, exists := club.clients[clientName]; !exists {
-				outLog := eventTime.Format(TemplateFormatTime) + " 13 " + "ClientUnknown"
-				club.eventLog = append(club.eventLog, outLog)
-			} else if currentClient, occupied := club.tableOccupancy[tableNumber]; occupied && currentClient.name != clientName {
-				outLog := eventTime.Format(TemplateFormatTime) + " 13 " + "PlaceIsBusy"
-				club.eventLog = append(club.eventLog, outLog)
-			} else {
-				if client.table != 0 {
-					club.calculateRevenue(client, eventTime)
-					club.tableOccupancy[client.table] = nil
-					club.tableOccupancy[tableNumber] = client
-					client.table = tableNumber
-				}
-				client.table = tableNumber
-				client.startTime = eventTime
-				club.tableOccupancy[tableNumber] = client
-			}
-		case 3:
-			outLog := eventTime.Format(TemplateFormatTime) + " 3 " + clientName
-			club.eventLog = append(club.eventLog, outLog)
-			if len(club.tableOccupancy) < club.tables {
-				outLog := eventTime.Format(TemplateFormatTime) + " 13 " + "ICanWaitNoLonger!"
-				club.eventLog = append(club.eventLog, outLog)
-				continue
-			}
-			if len(club.queue) < club.tables {
-				club.queue = append(club.queue, &Client{name: clientName})
-			} else {
-				outLog := eventTime.Format(TemplateFormatTime) + " 11 " + clientName
-				club.eventLog = append(club.eventLog, outLog)
-			}
-
-		case 4:
-			clientName := parts[2]
-			outLog := eventTime.Format(TemplateFormatTime) + " 4 " + clientName
-			club.eventLog = append(club.eventLog, outLog)
-			if client, exists := club.clients[clientName]; !exists {
-				outLog := eventTime.Format(TemplateFormatTime) + " 13 " + "ClientUnknown"
-				club.eventLog = append(club.eventLog, outLog)
-			} else {
-				club.calculateRevenue(client, eventTime)
-				club.tableOccupancy[client.table] = nil
-				delete(club.clients, clientName)
-
-				if len(club.queue) != 0 {
-					table, clientNameQueue := club.TakeAnEmptySeat(eventTime)
-					outLog := eventTime.Format(TemplateFormatTime) + " 12 " + clientNameQueue + " " + strconv.Itoa(table)
-					club.eventLog = append(club.eventLog, outLog)
-				}
-
-			}
+		if processEvent(event, club, &prevTimeEvent) {
+			formatError(event)
 		}
 	}
 
 	club.RemoveUsersAfterTime()
 	club.printResults()
+}
+
+func formatError(line string) {
+	fmt.Println("Input format error: " + line)
+	os.Exit(1)
+}
+
+func logEvent(eventTime time.Time, eventID int, args ...string) string {
+	return fmt.Sprintf("%s %d %s", eventTime.Format(TemplateFormatTime), eventID, strings.Join(args, " "))
+}
+
+func processEvent(event string, club *Club, prevTimeEvent *time.Time) bool {
+	parts := strings.Split(event, " ")
+	eventTime, err := time.Parse(TemplateFormatTime, parts[0])
+	if err != nil {
+		return true
+	}
+	if prevTimeEvent.After(eventTime) {
+		return true
+	}
+	*prevTimeEvent = eventTime
+
+	eventID, err := strconv.Atoi(parts[1])
+	if err != nil || eventID > 4 || eventID < 1 {
+		return true
+	}
+	clientName := parts[2]
+
+	if eventTime.After(club.closeTime) {
+		club.RemoveUsersAfterTime()
+	}
+
+	switch eventID {
+	case 1:
+		club.eventLog = append(club.eventLog, logEvent(eventTime, 1, clientName))
+		if _, exists := club.clients[clientName]; exists {
+			club.eventLog = append(club.eventLog, logEvent(eventTime, 13, "YouShallNotPass"))
+		} else if eventTime.Before(club.openTime) || eventTime.After(club.closeTime) {
+			club.eventLog = append(club.eventLog, logEvent(eventTime, 13, "NotOpenYet"))
+		} else {
+			club.clients[clientName] = &Client{name: clientName}
+		}
+	case 2:
+		tableNumber, err := strconv.Atoi(parts[3])
+		if err != nil || tableNumber > club.tables {
+			return true
+		}
+		club.eventLog = append(club.eventLog, logEvent(eventTime, 2, clientName, strconv.Itoa(tableNumber)))
+		client, exists := club.clients[clientName]
+		if !exists {
+			club.eventLog = append(club.eventLog, logEvent(eventTime, 13, "ClientUnknown"))
+		} else if currentClient, occupied := club.tableOccupancy[tableNumber]; occupied && currentClient.name != clientName {
+			club.eventLog = append(club.eventLog, logEvent(eventTime, 13, "PlaceIsBusy"))
+		} else {
+			if client.table != 0 {
+				club.calculateRevenue(client, eventTime)
+				club.tableOccupancy[client.table] = nil
+			}
+			client.table = tableNumber
+			client.startTime = eventTime
+			club.tableOccupancy[tableNumber] = client
+		}
+	case 3:
+		club.eventLog = append(club.eventLog, logEvent(eventTime, 3, clientName))
+		if len(club.tableOccupancy) < club.tables {
+			club.eventLog = append(club.eventLog, logEvent(eventTime, 13, "ICanWaitNoLonger!"))
+		} else if len(club.queue) < club.tables {
+			club.queue = append(club.queue, &Client{name: clientName})
+		} else {
+			club.eventLog = append(club.eventLog, logEvent(eventTime, 11, clientName))
+		}
+	case 4:
+		club.eventLog = append(club.eventLog, logEvent(eventTime, 4, clientName))
+		client, exists := club.clients[clientName]
+		if !exists {
+			club.eventLog = append(club.eventLog, logEvent(eventTime, 13, "ClientUnknown"))
+		} else {
+			club.calculateRevenue(client, eventTime)
+			club.tableOccupancy[client.table] = nil
+			delete(club.clients, clientName)
+
+			if len(club.queue) != 0 {
+				table, clientNameQueue := club.TakeAnEmptySeat(eventTime)
+				club.eventLog = append(club.eventLog, logEvent(eventTime, 12, clientNameQueue, strconv.Itoa(table)))
+			}
+		}
+	}
+	return false
 }
